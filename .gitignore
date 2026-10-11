@@ -9,7 +9,6 @@
 
 # Node modules and dependency files
 /node_modules/
-/package-lock.json
 /yarn.lock
 
 # Environment files
@@ -26,3 +25,11 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+/src/generated/prisma
+
+# Skills de agentes de IA geradas pelo prisma init (não fazem parte da aplicação)
+.agents/
+.claude/
+.windsurf/
+skills-lock.json

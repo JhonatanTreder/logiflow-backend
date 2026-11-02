@@ -1,6 +1,6 @@
 # LogiFlow — Regras de Negócio (RN)
 
-**Versão:** 1.0 · **Data:** 30/09/2026
+**Versão:** 1.2 · **Data:** 30/09/2026
 **Formato do ID:** `RN-<ÁREA>-NN`.
 Todos os valores numéricos (prazos, percentuais, limites) são **padrões iniciais** e devem ser implementados como **parâmetros configuráveis** (global, por empresa ou por contrato), salvo indicação contrária. Cada RN deve ter ao menos um teste automatizado nomeado com seu ID.
 
@@ -10,9 +10,9 @@ Todos os valores numéricos (prazos, percentuais, limites) são **padrões inici
 
 | ID | Regra |
 |---|---|
-| RN-GER-01 | Todo dado de negócio pertence a exatamente uma empresa (tenant). Nenhum usuário de empresa lojista acessa dados de outra empresa. |
-| RN-GER-02 | Usuários do tenant **operador** (a plataforma) acessam dados de todos os lojistas somente dentro das permissões do seu papel e sempre com registro de auditoria. |
-| RN-GER-03 | Empresa **suspensa** não cria pedidos nem encomendas; consulta, rastreio e entregas já em curso continuam normalmente. |
+| RN-GER-01 | Todo dado de negócio pertence a exatamente uma empresa (tenant). Nenhum usuário acessa dados de outro tenant, salvo nos casos da RN-GER-02. |
+| RN-GER-02 | Um usuário só acessa dados de outro tenant em dois casos, sempre dentro das permissões do seu papel e com registro de auditoria: (a) usuários do tenant **administrador** de um armazém, sobre o estoque e as operações **dentro desse armazém** (RN-ARM-05 e RN-ARM-06); (b) usuários com papel `ADMIN` da plataforma. A regra de visibilidade é aplicada em um único ponto da aplicação, com lista explícita de exceções; todo modelo novo nasce filtrado por tenant. |
+| RN-GER-03 | Tenant com status `BLOQUEADO` (ex.: inadimplência, decisão da plataforma; reversível) ou `INATIVO` (relacionamento encerrado) não cria pedidos nem encomendas; consulta, rastreio e entregas já em curso continuam normalmente. |
 | RN-GER-04 | CNPJ da empresa e CPF/CNPJ de destinatário devem ter dígitos verificadores válidos; CNPJ de empresa é único na plataforma. |
 | RN-GER-05 | Valores monetários são em BRL, armazenados em centavos, arredondados "metade para cima" (*half-up*) na unidade de centavo ao final de cada cálculo composto. |
 | RN-GER-06 | Pesos em gramas, dimensões em centímetros (inteiros ou 1 casa decimal), datas em UTC. Prazos são sempre expressos em **dias úteis**, salvo menção contrária. |
@@ -20,6 +20,7 @@ Todos os valores numéricos (prazos, percentuais, limites) são **padrões inici
 | RN-GER-08 | Registros de eventos de rastreio, movimentos de estoque, lançamentos financeiros e auditoria **nunca são alterados ou excluídos**; correções são feitas por novo registro compensatório. |
 | RN-GER-09 | Exclusão de cadastros que já tenham movimentação é lógica (inativação), nunca física. |
 | RN-GER-10 | Todo e-mail e telefone de destinatário é normalizado (minúsculas; E.164) antes de armazenar. |
+| RN-GER-11 | O cadastro de tenants é feito exclusivamente por usuários `ADMIN` da plataforma. O cadastro por conta própria (*self-service*) está fora do escopo atual. |
 
 ## 2. Autenticação e Acesso (SEG)
 
@@ -29,10 +30,10 @@ Todos os valores numéricos (prazos, percentuais, limites) são **padrões inici
 | RN-SEG-02 | Após 5 tentativas de login inválidas consecutivas, a conta é bloqueada por 15 minutos; o contador zera em login bem-sucedido. |
 | RN-SEG-03 | O link de recuperação de senha é de uso único e expira em 30 minutos. O convite de usuário expira em 7 dias. |
 | RN-SEG-04 | O *access token* expira em 15 minutos e o *refresh token* em 7 dias, sendo rotativo; o reuso de um *refresh token* já usado revoga toda a família de tokens da sessão. |
-| RN-SEG-05 | Papéis iniciais: `SUPER_ADMIN`, `GESTOR`, `OPERADOR_EMPRESA`, `OPERADOR_HUB`, `DESPACHANTE`, `ROTEIRIZADOR`, `ENTREGADOR`, `FINANCEIRO`, `SUPORTE`. Cada papel tem permissões explícitas; o que não é permitido é negado. |
-| RN-SEG-06 | `SUPER_ADMIN`, `GESTOR` e `FINANCEIRO` devem usar autenticação em dois fatores. |
-| RN-SEG-07 | Chaves de API têm escopos (ex.: `pedidos:escrever`, `rastreio:ler`), ambiente (`live` ou `test`) e podem ser revogadas a qualquer momento. Chave `test` nunca acessa dados `live`. |
-| RN-SEG-08 | Toda empresa deve ter ao menos um `GESTOR` ativo; o último gestor não pode ser desativado. |
+| RN-SEG-05 | Papéis do sistema: `USER` (padrão, **sem nenhuma permissão**), `ADMIN` (painel da plataforma), `DONO_EMPRESA`, `OPERADOR_EMPRESA`, `OPERADOR_ARMAZEM`, `DESPACHANTE`, `ROTEIRIZADOR`, `ENTREGADOR`, `CONTADOR`, `SUPORTE` e `CLIENTE` (reservado, sem uso definido; o destinatário não faz login). Cada papel tem permissões explícitas; o que não é permitido é negado. |
+| RN-SEG-06 | `ADMIN`, `DONO_EMPRESA` e `CONTADOR` devem usar autenticação em dois fatores. |
+| RN-SEG-07 | Chaves de API têm escopos (ex.: `pedidos:escrever`, `rastreio:ler`), ambiente (`live` ou `test`) e podem ser revogadas a qualquer momento. Chave `test` nunca acessa dados `live`. *(Decisão pendente: o ambiente `live`/`test` só é necessário se o sandbox dividir a mesma instalação e o mesmo banco da produção; com instalações separadas, a chave vale somente na instalação em que foi criada.)* |
+| RN-SEG-08 | Todo tenant deve ter ao menos um `DONO_EMPRESA` ativo; o último não pode ser desativado. |
 | RN-SEG-09 | Ações sensíveis geram auditoria: alteração de tabela de frete, ajuste de estoque, cancelamento após separação, estorno, indenização, mudança de papel, geração/revogação de chave de API. |
 
 ## 3. Cadastros e Produtos (CAD)
@@ -65,16 +66,53 @@ Todos os valores numéricos (prazos, percentuais, limites) são **padrões inici
 | ID | Regra |
 |---|---|
 | RN-EST-01 | O saldo disponível é `quantidade total − quantidade reservada`. O saldo total e o disponível **nunca podem ser negativos**. |
-| RN-EST-02 | A reserva é feita ao confirmar o pedido (todos os itens ou nenhum). Sem saldo suficiente, o pedido fica `CONFIRMADO` com itens "sem estoque" (*backorder*) e a loja é notificada, conforme configuração. |
+| RN-EST-02 | A **verificação de estoque é o primeiro passo** do processamento de um pedido `CONFIRMADO` e decide o caminho. Com saldo suficiente para **todos** os itens, em armazéns acessíveis ao tenant, reserva-se tudo (tudo ou nada) e o pedido segue para separação. Sem saldo suficiente: (a) se o tenant tem o recurso `SO_TRANSPORTE`, nada é reservado e a encomenda é de **coleta na origem** (RN-REC-03, RN-ENC-04); (b) caso contrário, o pedido fica `CONFIRMADO` com itens "sem estoque" (*backorder*) e a loja é notificada, conforme configuração. |
 | RN-EST-03 | A reserva é liberada ao cancelar o pedido ou o item, ou quando a encomenda é cancelada antes da separação. |
 | RN-EST-04 | A baixa física do estoque ocorre na **confirmação da separação** do item (leitura do código), transformando reserva em saída. |
 | RN-EST-05 | A seleção de localização na separação segue FEFO (se lote/validade), senão FIFO (entrada mais antiga primeiro). |
-| RN-EST-06 | Todo ajuste manual de estoque exige motivo (lista padronizada) e usuário; ajuste acima de 5% do saldo ou de 50 unidades exige aprovação de um `GESTOR`/supervisor. |
+| RN-EST-06 | Todo ajuste manual de estoque exige motivo (lista padronizada) e usuário; ajuste acima de 5% do saldo ou de 50 unidades exige aprovação do `DONO_EMPRESA` do tenant dono do estoque ou de um supervisor do administrador do armazém. |
 | RN-EST-07 | Recebimento com divergência (quantidade ≠ esperada) é registrado como "divergência" e só é endereçado após decisão (aceitar, devolver, ajustar). |
 | RN-EST-08 | Durante inventário de uma localização, ela fica "bloqueada para movimentação" até o fechamento da contagem. |
 | RN-EST-09 | Item devolvido só retorna ao estoque vendável após inspeção como "apto" (RN-DEV-06). |
 | RN-EST-10 | Quando o saldo disponível ≤ estoque mínimo, gera-se alerta único por SKU até que o saldo volte a superar o mínimo. |
 | RN-EST-11 | Reservas de pedidos não despachados por mais de 7 dias geram alerta de revisão ao Operador da empresa. |
+
+### 5.1 Armazéns compartilhados (ARM)
+
+Vários tenants podem guardar estoque no mesmo armazém, e o armazém tem um único administrador. A administração é um **relacionamento** (`Armazem.tenantId`), e não um tipo de tenant: um lojista que administra armazéns continua `LOJISTA`.
+
+| ID | Regra |
+|---|---|
+| RN-ARM-01 | Todo armazém/hub tem exatamente **um** tenant administrador (`Armazem.tenantId`). Não há administração compartilhada: a autoridade é única. |
+| RN-ARM-02 | Somente o administrador altera a estrutura do armazém (localizações, capacidade, horários) e concede, suspende ou revoga o acesso de outros tenants. Criar armazéns e conceder acessos exige o recurso `ADMINISTRAR_ARMAZEM` (RN-REC-02). |
+| RN-ARM-03 | Um tenant só guarda estoque em um armazém se for o administrador ou tiver vínculo `ATIVO` (`AcessoArmazem`). Vínculo `SUSPENSO` bloqueia novas entradas e reservas, mas **não** impede separar, transferir ou retirar o estoque já existente. |
+| RN-ARM-04 | O estoque nunca se mistura entre tenants: `Produto` pertence a um tenant (SKU único por tenant) e `SaldoEstoque` herda o `tenantId` do produto. O mesmo SKU de dois tenants são registros distintos, mesmo na mesma localização física. |
+| RN-ARM-05 | Um depositante vê e movimenta apenas o estoque do próprio tenant, sem ver o estoque nem a existência de outros depositantes. O administrador vê o estoque de todos os depositantes dos armazéns que administra. |
+| RN-ARM-06 | A equipe do administrador executa as operações físicas (receber, endereçar, separar, embalar, inventariar) sobre o estoque dos depositantes. Cada `MovimentoEstoque` grava o `tenantId` do **dono do estoque** e o `usuarioId` de **quem executou**, mesmo que sejam de tenants diferentes. |
+| RN-ARM-07 | *(Reservado, fora da primeira versão)* Nível `OPERADOR`: a equipe de um tenant vinculado opera dentro do armazém, mas **somente** sobre o estoque do próprio tenant, nunca sobre o de terceiros. |
+| RN-ARM-08 | *(Reservado)* Uma localização pode ser reservada a um tenant específico (área dedicada); separação e endereçamento de outros tenants não a utilizam. |
+| RN-ARM-09 | Um vínculo só pode ser revogado quando o tenant não tiver saldo no armazém; havendo saldo, o administrador exige antes retirada ou transferência. |
+| RN-ARM-10 | Em armazém compartilhado, a prioridade de separação entre tenants segue a RN-DES-01 (serviço, corte/SLA, antiguidade); o administrador pode definir regras adicionais por contrato. |
+| RN-ARM-11 | O administrador (com o recurso `COBRAR_ARMAZENAGEM`; a plataforma o possui implicitamente) pode cobrar dos depositantes por **ocupação** e por **manuseio**, por meio de tabelas de armazenagem do armazém. Vínculo sem tabela aplicada não gera cobrança (uso gratuito ou acertado fora do sistema). |
+| RN-ARM-12 | Tipos de cobrança: `OCUPACAO_POSICAO_DIA`, `OCUPACAO_M3_DIA`, `MANUSEIO_RECEBIMENTO`, `MANUSEIO_SEPARACAO` e `MANUSEIO_EXPEDICAO`. Valores em centavos; cada item da tabela pode ter dias de carência (padrão 0) e mínimo mensal. |
+| RN-ARM-13 | A ocupação é apurada por um job diário que grava, por (armazém, depositante, data), as posições ocupadas e o volume em m³. O registro é imutável e é a base da cobrança de ocupação. |
+| RN-ARM-14 | Cada manuseio gera um lançamento no evento correspondente: recebimento conferido, separação concluída e expedição (fechamento do manifesto). |
+| RN-ARM-15 | As tabelas de armazenagem são versionadas e têm vigência; o preço aplicado é gravado no lançamento (*snapshot*) e alterações não retroagem. Só o administrador cria ou altera tabelas; o depositante vê apenas a tabela aplicada a ele. |
+| RN-ARM-16 | O lançamento de armazenagem tem o depositante como devedor e o administrador como credor (RN-FIN-12). Quando o administrador é a plataforma, entra na mesma fatura do tenant; quando é outro tenant, gera-se fatura própria, com ele como emissor, no ciclo do devedor. |
+| RN-ARM-17 | Inadimplência de armazenagem entre tenants **não** bloqueia a criação de encomendas (a RN-FIN-07 vale só para faturas da plataforma); o administrador pode suspender o vínculo (RN-ARM-03). A cobrança de ocupação continua enquanto houver estoque no armazém. |
+| RN-ARM-18 | O LogiFlow registra e itemiza a cobrança, mas **não intermedia o pagamento** quando o credor não é a plataforma, nem garante o recebimento; o pagamento é registrado manualmente ou simulado. |
+
+### 5.2 Recursos habilitados por tenant (REC)
+
+A plataforma controla, por tenant, o que cada empresa pode fazer, por meio de **recursos habilitados** em um painel de permissões (`ADMIN`). No futuro, contratos poderão habilitar esses recursos automaticamente.
+
+| ID | Regra |
+|---|---|
+| RN-REC-01 | Recursos: `ADMINISTRAR_ARMAZEM`, `SO_TRANSPORTE` e `COBRAR_ARMAZENAGEM`. Somente `ADMIN` concede ou revoga, com registro de auditoria (RN-SEG-09). O tenant `OPERADOR_LOGISTICO` possui todos implicitamente. |
+| RN-REC-02 | Sem `ADMINISTRAR_ARMAZEM`, o tenant não cria armazéns nem concede acesso de outros tenants a armazéns. |
+| RN-REC-03 | `SO_TRANSPORTE` permite criar encomendas de **coleta na origem** quando não há estoque no sistema (RN-EST-02). A encomenda parte do endereço de origem da loja, e não de um armazém. |
+| RN-REC-04 | `COBRAR_ARMAZENAGEM` exige `ADMINISTRAR_ARMAZEM` e permite definir tabelas de armazenagem e cobrar depositantes (RN-ARM-11). |
+| RN-REC-05 | Revogar `ADMINISTRAR_ARMAZEM` não apaga armazéns nem acessos existentes: o tenant continua administrando o que já tem, mas não cria novos armazéns nem concede novos acessos. Revogar `COBRAR_ARMAZENAGEM` encerra a vigência das tabelas, sem apagar lançamentos já gerados. |
 
 ## 6. Frete e Cotação (FRE)
 
@@ -103,14 +141,14 @@ Todos os valores numéricos (prazos, percentuais, limites) são **padrões inici
 | RN-ENC-01 | **Código de rastreio:** `LF` + 9 dígitos + 1 dígito verificador (módulo 11) + `BR` (13 caracteres), único em toda a plataforma, gerado na criação e imutável. |
 | RN-ENC-02 | Cada volume possui código de barras próprio derivado do rastreio e do número do volume (`<rastreio>-<NN>`). |
 | RN-ENC-03 | Uma encomenda só pode ser criada se: pedido `CONFIRMADO`, endereço válido, produtos completos (RN-CAD-02), serviço disponível e empresa ativa. |
-| RN-ENC-04 | **Transições permitidas** (qualquer outra é rejeitada): `CRIADA→AGUARDANDO_SEPARACAO→EM_SEPARACAO→SEPARADA→EMBALADA→AGUARDANDO_DESPACHO→DESPACHADA→EM_TRANSITO`; `EM_TRANSITO→NO_HUB`; `NO_HUB→EM_TRANSITO`; `NO_HUB→EM_ROTA`; `EM_ROTA→ENTREGUE`; `EM_ROTA→TENTATIVA_FALHA`; `TENTATIVA_FALHA→NO_HUB`; `TENTATIVA_FALHA→EM_DEVOLUCAO`; `NO_HUB→AGUARDANDO_RETIRADA`; `AGUARDANDO_RETIRADA→ENTREGUE`/`EM_DEVOLUCAO`; `EM_TRANSITO→ENTREGUE` (entrega por transportadora); `EM_DEVOLUCAO→DEVOLVIDA`; `EM_TRANSITO→EXTRAVIADA`; cancelamento de `CRIADA` até `SEPARADA`. |
+| RN-ENC-04 | **Transições permitidas** (qualquer outra é rejeitada): `CRIADA→AGUARDANDO_SEPARACAO→EM_SEPARACAO→SEPARADA→EMBALADA→AGUARDANDO_DESPACHO→DESPACHADA→EM_TRANSITO`; `EM_TRANSITO→NO_HUB`; `NO_HUB→EM_TRANSITO`; `NO_HUB→EM_ROTA`; `EM_ROTA→ENTREGUE`; `EM_ROTA→TENTATIVA_FALHA`; `TENTATIVA_FALHA→NO_HUB`; `TENTATIVA_FALHA→EM_DEVOLUCAO`; `NO_HUB→AGUARDANDO_RETIRADA`; `AGUARDANDO_RETIRADA→ENTREGUE`/`EM_DEVOLUCAO`; `EM_TRANSITO→ENTREGUE` (entrega por transportadora); `EM_DEVOLUCAO→DEVOLVIDA`; `EM_TRANSITO→EXTRAVIADA`; cancelamento de `CRIADA` até `SEPARADA`; **coleta na origem** (tenant com `SO_TRANSPORTE`): `CRIADA→AGUARDANDO_COLETA→COLETADA→NO_HUB`, com cancelamento permitido até `AGUARDANDO_COLETA`. |
 | RN-ENC-05 | Cada transição gera, na mesma transação, um `EventoRastreio` e um evento de domínio (outbox). |
 | RN-ENC-06 | Estados finais (`ENTREGUE`, `DEVOLVIDA`, `CANCELADA`, `EXTRAVIADA`) não admitem novas transições, exceto `EXTRAVIADA → (localizada) NO_HUB` mediante ação do Suporte com justificativa. |
 | RN-ENC-07 | Eventos externos (transportadora) fora de ordem cronológica são aceitos e ordenados por `ocorridoEm`, mas só alteram o status atual se forem mais recentes que o último evento aplicado. |
 | RN-ENC-08 | O evento de rastreio contém: tipo, descrição amigável, local, origem (sistema/usuário/transportadora), data/hora real do ocorrido e data/hora de registro. |
 | RN-ENC-09 | A encomenda mantém `prazoPrevisto` calculado na criação; só é recalculado em reagendamento aprovado ou mudança de serviço. Encomenda com `agora > prazoPrevisto` e sem estado final é "atrasada". |
 | RN-ENC-10 | Encomenda "sob risco de atraso" é aquela cujo tempo restante para o prazo é menor que o tempo médio histórico das etapas restantes. |
-| RN-ENC-11 | **Cancelamento:** até `SEPARADA` — sem custo; `EMBALADA` até `AGUARDANDO_DESPACHO` — com taxa de manuseio (padrão R$ 3,00) e retorno do item ao estoque; a partir de `DESPACHADA` — não há cancelamento: aplica-se solicitação de devolução/interceptação, com custos. |
+| RN-ENC-11 | **Cancelamento:** até `SEPARADA` — sem custo; `EMBALADA` até `AGUARDANDO_DESPACHO` — com taxa de manuseio (padrão R$ 3,00) e retorno do item ao estoque; a partir de `DESPACHADA` — não há cancelamento: aplica-se solicitação de devolução/interceptação, com custos. Em coleta na origem, o cancelamento é permitido até `AGUARDANDO_COLETA`, sem custo. |
 | RN-ENC-12 | O reagendamento de entrega é permitido até 2 vezes por encomenda, com nova data de até 10 dias úteis à frente e dentro da janela de operação do hub. |
 | RN-ENC-13 | Encomendas com serviço de prioridade maior (Same-day > Expresso > Econômico) têm precedência em filas de separação, despacho e rota. |
 
@@ -219,11 +257,12 @@ Todos os valores numéricos (prazos, percentuais, limites) são **padrões inici
 | RN-FIN-04 | Vencimento da fatura: 7 dias corridos após o fechamento. Atraso: multa de 2% + juros de 1% ao mês *pro rata die*. |
 | RN-FIN-05 | Fatura fechada é imutável; ajustes posteriores entram na próxima fatura. |
 | RN-FIN-06 | Cobranças adicionais (diferença de peso, devolução, reentrega, redespacho, taxa de cancelamento) devem referenciar a encomenda e o motivo, sendo itemizadas na fatura. |
-| RN-FIN-07 | Fatura vencida há 15 dias bloqueia novas encomendas da empresa (RN-GER-03 parcial: bloqueio de criação), exceto devoluções e entregas em andamento. Pagamento libera o bloqueio automaticamente. |
+| RN-FIN-07 | Fatura **emitida pela plataforma** vencida há 15 dias bloqueia novas encomendas da empresa (RN-GER-03 parcial: bloqueio de criação), exceto devoluções e entregas em andamento. Pagamento libera o bloqueio automaticamente. |
 | RN-FIN-08 | Conciliação: se o custo cobrado pela transportadora divergir do esperado em mais de 3% ou R$ 2,00, gera pendência de conciliação. |
 | RN-FIN-09 | **Margem** = receita − custo (transportadora + repasse de entregador + taxas). Margem negativa por encomenda é sinalizada em relatório. |
 | RN-FIN-10 | **Repasse do entregador (padrão):** valor fixo por entrega concluída, mais adicional por quilômetro; tentativa falha válida paga 50% do valor da entrega; fechamento semanal. Valores definidos por hub/veículo. |
 | RN-FIN-11 | No modelo pré-pago, a encomenda só é criada se houver saldo suficiente; o valor é debitado no despacho. |
+| RN-FIN-12 | Todo lançamento e toda fatura têm um tenant **devedor** (`tenantId`) e um tenant **emissor** (credor). Para frete e serviços de transporte, o emissor é a plataforma; para armazenagem, é o administrador do armazém. O bloqueio da RN-FIN-07 vale somente para faturas emitidas pela plataforma. |
 
 ## 16. Notificações e Webhooks (NOT)
 

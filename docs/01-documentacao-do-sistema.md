@@ -1,6 +1,6 @@
 # LogiFlow — Documentação do Sistema
 
-**Versão:** 1.0 · **Data:** 30/09/2026 · **Tipo de projeto:** estudo / uso pessoal (escopo de produto completo)
+**Versão:** 1.2 · **Data:** 30/09/2026 · **Tipo de projeto:** estudo / uso pessoal (escopo de produto completo)
 
 > Conjunto de documentos: `01-documentacao-do-sistema` (este) · `02-requisitos-funcionais` · `03-requisitos-nao-funcionais` · `04-regras-de-negocio` · `05-casos-de-uso`.
 > "LogiFlow" é um nome provisório; troque à vontade.
@@ -20,7 +20,7 @@ O **LogiFlow** é uma plataforma de logística *multiempresa* (multi-tenant) par
 ### 1.3 Escopo
 **Dentro do escopo:** tudo listado nos módulos da seção 4.
 
-**Fora do escopo (simulado ou adiado):** emissão fiscal real (NF-e/CT-e/MDF-e), pagamento real (PIX/boleto/cartão), integração real com Correios/transportadoras (usa-se *adapters* com sandbox/mock), envio real de SMS/WhatsApp (adapter simulado), apps nativos (usa-se PWA), cálculo de rotas com trânsito em tempo real.
+**Fora do escopo (simulado ou adiado):** cadastro de empresas por conta própria (o cadastro é feito pela plataforma), emissão fiscal real (NF-e/CT-e/MDF-e), pagamento real (PIX/boleto/cartão), integração real com Correios/transportadoras (usa-se *adapters* com sandbox/mock), envio real de SMS/WhatsApp (adapter simulado), apps nativos (usa-se PWA), cálculo de rotas com trânsito em tempo real.
 
 ### 1.4 Público-alvo (atores)
 | Ator | Descrição |
@@ -73,7 +73,7 @@ Detalhes completos nos documentos 02 (RF), 03 (RNF), 04 (RN) e 05 (casos de uso)
 |---|---|---|
 | AUT | Autenticação e Acesso | Login, tokens, 2FA, papéis (RBAC), API keys. |
 | TEN | Empresas e Lojas | Tenants, lojas, endereços de origem, configurações, contratos. |
-| CAT | Produtos e Estoque | SKUs, armazéns, localizações, saldos, movimentações, inventário. |
+| CAT | Produtos e Estoque | SKUs, armazéns, localizações, acesso de empresas ao armazém, saldos, movimentações, inventário. |
 | PED | Pedidos | Recepção/importação, validação, edição, cancelamento. |
 | FRE | Frete | Zonas, tabelas, serviços, cotação, seguro, prazos. |
 | ENC | Encomendas | Remessas, volumes, código de rastreio, máquina de estados. |
@@ -147,7 +147,11 @@ flowchart TB
 - **Estratégia:** banco único, esquema único, coluna `tenant_id` em todas as tabelas de negócio (*shared schema*).
 - O `tenant_id` vem do token (usuário) ou da API key; é injetado em um contexto de requisição (AsyncLocalStorage) e aplicado automaticamente via **Prisma Client Extension** em todas as queries (filtro + preenchimento na criação).
 - Defesa em profundidade (opcional/avançada): **Row-Level Security** do PostgreSQL com `SET LOCAL app.tenant_id`.
-- Papéis internos (operador de hub, entregador, roteirizador) pertencem ao **tenant operador** (a própria plataforma), com acesso às encomendas de todos os lojistas dentro das permissões.
+- O tenant `OPERADOR_LOGISTICO` é a própria plataforma. **Administrar um armazém é um relacionamento** (`Armazem.tenantId`), e não um tipo de tenant: um lojista grande pode administrar armazéns e continuar `LOJISTA`.
+- **Regra de visibilidade:** um registro é visível se pertence ao tenant da requisição **ou** se está em um armazém que esse tenant administra (RN-GER-02, RN-ARM-05 e RN-ARM-06). A regra fica em **um único ponto** (a extension do Prisma), com lista explícita de modelos exceção; modelo novo nasce filtrado por tenant (padrão seguro).
+- Entidades de infraestrutura (localizações, hubs, rotas, frota) não têm `tenantId` próprio: herdam o administrador do armazém/hub ao qual se ligam. Dados globais (transportadoras, tabelas de frete, feriados) ficam fora do filtro.
+- Vários tenants podem guardar estoque no mesmo armazém por meio de vínculos (`AcessoArmazem`), com um único administrador (RN-ARM-01 a RN-ARM-11).
+- **Recursos habilitados por tenant:** o `ADMIN` da plataforma concede ou revoga recursos (`ADMINISTRAR_ARMAZEM`, `SO_TRANSPORTE`, `COBRAR_ARMAZENAGEM`) em um painel de permissões (RN-REC-01 a RN-REC-05). O cadastro de tenants é feito somente pela plataforma (RN-GER-11).
 
 ### 5.4 Comunicação assíncrona e eventos
 - **Eventos de domínio** (ex.: `EncomendaDespachada`, `EntregaConcluida`) publicados após commit (padrão *outbox*: tabela `outbox_event` lida por worker, garantindo entrega *at-least-once*).
@@ -166,6 +170,8 @@ flowchart TB
 | ADR-06 | Datas em UTC, exibição `America/Sao_Paulo` | Datas locais | Evita bugs de fuso e horário de verão. |
 | ADR-07 | PWA para entregador | App nativo | Mesmo stack, câmera/GPS via Web APIs. |
 | ADR-08 | Adapters para transportadoras | Integração direta | Troca/mocking sem tocar no domínio. |
+| ADR-09 | Armazém com um tenant administrador; demais tenants por vínculo (`AcessoArmazem`) | Armazém sem dono, ou dono exclusivo do estoque | Permite armazéns compartilhados com autoridade única e estoque isolado por tenant. |
+| ADR-10 | Permissões da plataforma como recursos habilitados por tenant (painel do `ADMIN`) | Tipos de tenant fixos ou regras no código | Controla quem administra armazém, envia sem estoque e cobra armazenagem sem criar novos tipos de empresa. |
 
 ---
 
@@ -212,13 +218,15 @@ flowchart TB
 ### 7.1 Entidades principais
 | Entidade | Principais atributos | Relações |
 |---|---|---|
-| `Tenant` | id, tipo (OPERADOR/LOJISTA), razaoSocial, cnpj, status, configuracoes(json) | 1:N Loja, Usuario, Contrato |
+| `Tenant` | id, tipo (OPERADOR_LOGISTICO/LOJISTA), razaoSocial, cnpj, status, configuracoes(json) | 1:N Loja, Usuario, Contrato |
 | `Loja` | id, tenantId, nome, dominio, enderecoOrigemId, webhookSecret | N:1 Tenant |
 | `Usuario` | id, tenantId, nome, email, senhaHash, papel, totpSecret?, status | N:1 Tenant |
 | `ApiKey` | id, tenantId, hash, escopos, ultimoUso, revogadaEm | N:1 Tenant |
+| `RecursoTenant` | id, tenantId, recurso (ADMINISTRAR_ARMAZEM/SO_TRANSPORTE/COBRAR_ARMAZENAGEM), concedidoPorId, revogadoEm | N:1 Tenant |
 | `Produto` | id, tenantId, sku, nome, pesoG, alturaCm, larguraCm, comprimentoCm, valorCentavos, fragil | 1:N Saldo |
-| `Armazem` / `Hub` | id, nome, tipo, endereco, lat, lng, capacidade | 1:N Localizacao |
+| `Armazem` / `Hub` | id, tenantId (administrador), nome, tipo, endereco, lat, lng, capacidade | 1:N Localizacao, AcessoArmazem |
 | `Localizacao` | id, armazemId, codigo (corredor-prateleira-nível) | N:1 Armazem |
+| `AcessoArmazem` | armazemId, tenantId, nivel (DEPOSITANTE/OPERADOR), status | N:1 Armazem, N:1 Tenant |
 | `SaldoEstoque` | produtoId, localizacaoId, quantidade, reservada | — |
 | `MovimentoEstoque` | id, produtoId, tipo, quantidade, origem, motivo, usuarioId | imutável |
 | `Pedido` | id, tenantId, lojaId, numeroExterno, status, destinatarioId, enderecoEntregaId, valorProdutosCentavos, valorDeclarado | 1:N ItemPedido, Encomenda |
@@ -270,6 +278,10 @@ erDiagram
   ENCOMENDA ||--o{ LANCAMENTO_FINANCEIRO : gera
   FATURA ||--|{ LANCAMENTO_FINANCEIRO : agrupa
   ARMAZEM ||--o{ LOCALIZACAO : tem
+  TENANT ||--o{ ARMAZEM : administra
+  TENANT ||--o{ RECURSO_TENANT : possui
+  ARMAZEM ||--o{ ACESSO_ARMAZEM : autoriza
+  TENANT ||--o{ ACESSO_ARMAZEM : usa
   LOCALIZACAO ||--o{ SALDO_ESTOQUE : guarda
   PRODUTO ||--o{ SALDO_ESTOQUE : possui
 ```
@@ -310,6 +322,10 @@ stateDiagram-v2
   EM_DEVOLUCAO --> DEVOLVIDA
   EM_TRANSITO --> EXTRAVIADA
   CRIADA --> CANCELADA
+  CRIADA --> AGUARDANDO_COLETA : coleta na origem
+  AGUARDANDO_COLETA --> COLETADA
+  COLETADA --> NO_HUB
+  AGUARDANDO_COLETA --> CANCELADA
   AGUARDANDO_SEPARACAO --> CANCELADA
   EM_SEPARACAO --> CANCELADA
   SEPARADA --> CANCELADA

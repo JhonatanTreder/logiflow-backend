@@ -1,6 +1,6 @@
 # LogiFlow — Entidades e Modelos (campos)
 
-**Versão:** 1.0 · **Data:** 10/10/2026
+**Versão:** 1.2 · **Data:** 10/10/2026
 Este documento lista **apenas os campos** de cada entidade. Relacionamentos, índices e regras de negócio estão nos documentos 01 (seção 7) e 04.
 
 ## Convenções
@@ -17,7 +17,7 @@ Este documento lista **apenas os campos** de cada entidade. Relacionamentos, ín
 | CEP | `String` com 8 dígitos, sem hífen. |
 | Tabelas no banco | `snake_case` no plural (via `@@map`); campos em `camelCase` no modelo. |
 
-Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plataforma (hubs, rotas, frota) · **Global** = compartilhado.
+Legenda de escopo: **Tenant** = pertence a um tenant (`tenantId`) · **Tenant administrador** = pertence ao tenant que administra o armazém · **Via armazém** = herda o administrador do armazém/hub ao qual se liga, sem `tenantId` próprio · **Global** = compartilhado.
 
 ---
 
@@ -26,18 +26,20 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 ### Tenant (Global) — empresa
 | Campo | Tipo | Observação |
 |---|---|---|
-| tipo | TipoTenant | `OPERADOR` ou `LOJISTA` |
+| tipo | TipoTenant | `OPERADOR_LOGISTICO` ou `LOJISTA`. Descreve o papel da empresa na plataforma; administrar um armazém é relacionamento (`Armazem.tenantId`), não tipo |
 | razaoSocial | String | |
 | nomeFantasia | String? | |
-| cnpj | String | Único; dígitos validados |
-| status | StatusTenant | `ATIVO`, `SUSPENSO` |
+| cnpj | String | Único; somente os 14 dígitos (sem máscara); formato validado na aplicação |
+| status | StatusTenant | `ATIVO`, `INATIVO`, `BLOQUEADO`; padrão `ATIVO` |
 | contatoEmail | String | |
-| contatoTelefone | String? | |
-| cicloFaturamento | CicloFaturamento | `SEMANAL`, `QUINZENAL`, `MENSAL` |
-| modeloCobranca | ModeloCobranca | `FATURA`, `PRE_PAGO` |
-| saldoPrePagoCentavos | Int | Padrão 0 |
-| horarioCorte | String | `HH:mm`, padrão `14:00` |
-| configuracoes | Json | Frete grátis, seguro automático, remetente nas etiquetas, branding |
+| contatoTelefone | String | |
+| cicloFaturamento | CicloFaturamento? | **Fase 7.** Só `LOJISTA`; nulo no operador logístico. Valores a definir (RN-FIN-03 prevê `SEMANAL`, `QUINZENAL`, `MENSAL`) |
+| modeloCobranca | ModeloCobranca? | **Fase 7.** `FATURA`, `PRE_PAGO`; só `LOJISTA` |
+| saldoPrePagoCentavos | Int | **Fase 7.** Padrão 0 |
+| horarioCorte | String? | **Fase 2.** `HH:mm`, padrão `14:00`; usado no cálculo de prazo (RN-FRE-06), e não no faturamento |
+| configuracoes | Json | **Fase 2.** Padrão `{}`; frete grátis, seguro automático, remetente nas etiquetas, branding |
+
+> A primeira migration (Fase 1) contém apenas: `tipo`, `razaoSocial`, `nomeFantasia`, `cnpj`, `status`, `contatoEmail`, `contatoTelefone` e os campos de controle.
 
 ### Loja (Tenant)
 | Campo | Tipo | Observação |
@@ -48,20 +50,20 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 | enderecoOrigemId | UUID | → Endereco |
 | ativa | Boolean | |
 
-### Usuario (Tenant)
+### Usuario (Tenant) — no schema Prisma o model chama-se `User` (tabela `users`)
 | Campo | Tipo | Observação |
 |---|---|---|
 | tenantId | UUID | |
 | nome | String | |
 | email | String | Único por tenant (`tenantId` + `email`) |
 | senhaHash | String | Argon2id |
-| papel | Papel | |
+| papel | Papel | Padrão `USER` (sem permissões) |
 | status | StatusUsuario | `ATIVO`, `INATIVO`, `CONVIDADO`, `BLOQUEADO` |
 | totpAtivo | Boolean | |
 | totpSecretCifrado | String? | |
 | tentativasFalhas | Int | Zera no login válido |
 | bloqueadoAte | DateTime? | |
-| ultimoLoginEm | DateTime? | |
+| ultimoAcessoEm | DateTime? | |
 
 ### Sessao (Tenant)
 | Campo | Tipo | Observação |
@@ -91,10 +93,18 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 | nome | String | |
 | prefixo | String | Parte visível (ex.: `lf_live_ab12`) |
 | hash | String | Chave nunca guardada em claro |
-| ambiente | Ambiente | `LIVE`, `TEST` |
+| ambiente | Ambiente | `LIVE`, `TEST`. **Decisão pendente:** só é necessário se sandbox e produção dividirem a mesma instalação e o mesmo banco (RN-SEG-07) |
 | escopos | String[] | Ex.: `pedidos:escrever` |
 | ultimoUsoEm | DateTime? | |
 | revogadaEm | DateTime? | |
+
+### RecursoTenant (Global) — recursos habilitados (painel de permissões)
+| Campo | Tipo | Observação |
+|---|---|---|
+| tenantId | UUID | Tenant que recebe o recurso |
+| recurso | RecursoPlataforma | `ADMINISTRAR_ARMAZEM`, `SO_TRANSPORTE`, `COBRAR_ARMAZENAGEM` |
+| concedidoPorId | UUID | Usuário `ADMIN` |
+| revogadoEm | DateTime? | Nulo = recurso ativo; um recurso ativo por tenant |
 
 ---
 
@@ -149,9 +159,10 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 | estoqueMinimo | Int | Padrão 0 |
 | ativo | Boolean | |
 
-### Armazem (Operador) — armazém e hub
+### Armazem (Tenant administrador) — armazém e hub
 | Campo | Tipo | Observação |
 |---|---|---|
+| tenantId | UUID | Tenant **administrador** (único); define estrutura e acessos (RN-ARM-01) |
 | nome | String | |
 | codigo | String | Único |
 | tipo | TipoArmazem | `ARMAZEM`, `HUB_COLETA`, `HUB_TRIAGEM`, `HUB_ULTIMA_MILHA` |
@@ -160,14 +171,14 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 | horarioFuncionamento | Json | |
 | ativo | Boolean | |
 
-### CoberturaHub (Operador)
+### CoberturaHub (Via armazém)
 | Campo | Tipo | Observação |
 |---|---|---|
 | hubId | UUID | → Armazem |
 | cepInicio | String | |
 | cepFim | String | |
 
-### Localizacao (Operador)
+### Localizacao (Via armazém)
 | Campo | Tipo | Observação |
 |---|---|---|
 | armazemId | UUID | |
@@ -177,6 +188,18 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 | nivel | String | |
 | posicao | String? | |
 | bloqueada | Boolean | Durante inventário |
+
+### AcessoArmazem (Tenant) — vínculo de tenants ao armazém · Fase 3
+| Campo | Tipo | Observação |
+|---|---|---|
+| armazemId | UUID | |
+| tenantId | UUID | Tenant autorizado a usar o armazém |
+| nivel | NivelAcessoArmazem | `DEPOSITANTE`; `OPERADOR` reservado (RN-ARM-07) |
+| status | StatusAcesso | `ATIVO`, `SUSPENSO` |
+| tabelaArmazenagemId | UUID? | Tabela de armazenagem aplicada ao depositante (Fase 7) |
+| concedidoPorId | UUID | Usuário do administrador que concedeu |
+
+> Único por (`armazemId`, `tenantId`). O administrador **não** aparece aqui: ele é o `Armazem.tenantId`.
 
 ---
 
@@ -196,7 +219,7 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 ### MovimentoEstoque 🔒 (Tenant)
 | Campo | Tipo | Observação |
 |---|---|---|
-| tenantId | UUID | |
+| tenantId | UUID | **Dono do estoque** movimentado (RN-ARM-06) |
 | produtoId | UUID | |
 | localizacaoId | UUID? | |
 | tipo | TipoMovimento | |
@@ -204,7 +227,7 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 | motivo | String | Lista padronizada |
 | referenciaTipo | String? | Ex.: `PEDIDO`, `RECEBIMENTO` |
 | referenciaId | UUID? | |
-| usuarioId | UUID | |
+| usuarioId | UUID | Quem executou; pode ser de outro tenant (administrador do armazém) |
 | aprovadoPorId | UUID? | Ajustes grandes |
 
 ### RecebimentoMercadoria (Tenant)
@@ -402,7 +425,9 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 | cotacaoId | UUID | |
 | status | StatusEncomenda | |
 | prioridade | Int | Derivada do serviço |
-| armazemOrigemId | UUID | |
+| tipoOrigem | TipoOrigemEncomenda | `ARMAZEM` ou `COLETA_NA_ORIGEM` (recurso `SO_TRANSPORTE`) |
+| armazemOrigemId | UUID? | Nulo em coleta na origem |
+| enderecoOrigemId | UUID? | Endereço da loja, em coleta na origem |
 | hubDestinoId | UUID? | |
 | destinatarioId | UUID | |
 | enderecoEntregaId | UUID | |
@@ -464,7 +489,7 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 
 ## 6. Despacho, Transporte e Hubs · Fases 3 e 4
 
-### OrdemSeparacao (Operador)
+### OrdemSeparacao (Via armazém)
 | Campo | Tipo | Observação |
 |---|---|---|
 | encomendaId | UUID | |
@@ -485,7 +510,7 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 | quantidadeSeparada | Int | |
 | falta | Boolean | |
 
-### Manifesto (Operador)
+### Manifesto (Via armazém)
 | Campo | Tipo | Observação |
 |---|---|---|
 | tipo | TipoManifesto | `COLETA_TRANSPORTADORA`, `TRANSFERENCIA_HUB`, `ROTA` |
@@ -508,7 +533,7 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 | conferido | Boolean | |
 | conferidoEm | DateTime? | |
 
-### UnidadeConsolidada (Operador)
+### UnidadeConsolidada (Via armazém)
 | Campo | Tipo | Observação |
 |---|---|---|
 | hubId | UUID | |
@@ -516,7 +541,7 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 | status | StatusUnidade | `ABERTA`, `FECHADA`, `EM_TRANSITO`, `ABERTA_NO_DESTINO` |
 | manifestoId | UUID? | |
 
-### RecebimentoHub (Operador)
+### RecebimentoHub (Via armazém)
 | Campo | Tipo | Observação |
 |---|---|---|
 | hubId | UUID | |
@@ -549,7 +574,7 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 
 ## 7. Rotas e Entregas · Fase 5
 
-### Veiculo (Operador)
+### Veiculo (Via armazém)
 | Campo | Tipo | Observação |
 |---|---|---|
 | placa | String | Única |
@@ -560,7 +585,7 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 | hubId | UUID | |
 | status | StatusVeiculo | `ATIVO`, `MANUTENCAO`, `INATIVO` |
 
-### Entregador (Operador)
+### Entregador (Via armazém)
 | Campo | Tipo | Observação |
 |---|---|---|
 | usuarioId | UUID | Único |
@@ -574,7 +599,7 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 | consentimentoLocalizacaoEm | DateTime? | |
 | status | StatusEntregador | `ATIVO`, `INATIVO`, `SUSPENSO` |
 
-### Rota (Operador)
+### Rota (Via armazém)
 | Campo | Tipo | Observação |
 |---|---|---|
 | hubId | UUID | |
@@ -642,7 +667,7 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 | expiraEm | DateTime | Com o fim da rota |
 | usadoEm | DateTime? | |
 
-### PosicaoEntregador 🔒 (Operador)
+### PosicaoEntregador 🔒 (Via armazém)
 | Campo | Tipo | Observação |
 |---|---|---|
 | rotaId | UUID | |
@@ -736,11 +761,12 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 ### LancamentoFinanceiro 🔒 (Tenant)
 | Campo | Tipo | Observação |
 |---|---|---|
-| tenantId | UUID | |
+| tenantId | UUID | **Devedor** |
+| emissorTenantId | UUID | **Credor**: plataforma (frete) ou administrador do armazém (armazenagem), RN-FIN-12 |
 | encomendaId | UUID? | |
 | faturaId | UUID? | Preenchido no fechamento |
 | natureza | NaturezaLancamento | `RECEITA`, `CUSTO`, `CREDITO`, `ESTORNO` |
-| tipo | TipoLancamento | `FRETE`, `SEGURO`, `TAXA`, `DIFERENCA_PESO`, `DEVOLUCAO`, `REENTREGA`, `REDESPACHO`, `CANCELAMENTO`, `INDENIZACAO`, `OUTROS` |
+| tipo | TipoLancamento | `FRETE`, `SEGURO`, `TAXA`, `DIFERENCA_PESO`, `DEVOLUCAO`, `REENTREGA`, `REDESPACHO`, `CANCELAMENTO`, `INDENIZACAO`, `ARMAZENAGEM`, `MANUSEIO`, `OUTROS` |
 | valorCentavos | Int | |
 | lancamentoOriginalId | UUID? | Em estornos |
 | motivo | String? | |
@@ -749,7 +775,8 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 ### Fatura (Tenant)
 | Campo | Tipo | Observação |
 |---|---|---|
-| tenantId | UUID | |
+| tenantId | UUID | **Devedor** |
+| emissorTenantId | UUID | **Credor** (RN-FIN-12) |
 | periodoInicio | Date | |
 | periodoFim | Date | |
 | status | StatusFatura | `RASCUNHO`, `FECHADA`, `PAGA`, `VENCIDA`, `CANCELADA` |
@@ -772,7 +799,7 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 | pagoEm | DateTime | |
 | registradoPorId | UUID | |
 
-### RepasseEntregador (Operador)
+### RepasseEntregador (Via armazém)
 | Campo | Tipo | Observação |
 |---|---|---|
 | entregadorId | UUID | |
@@ -789,6 +816,34 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 | tentativaId | UUID? | |
 | tipo | TipoItemRepasse | `ENTREGA`, `FALHA_VALIDA`, `KM` |
 | valorCentavos | Int | |
+
+### TabelaArmazenagem (Tenant administrador) · Fase 7
+| Campo | Tipo | Observação |
+|---|---|---|
+| armazemId | UUID | |
+| nome | String | |
+| versao | Int | Cada alteração gera nova versão |
+| vigenciaInicio | Date | |
+| vigenciaFim | Date? | |
+| ativa | Boolean | |
+
+### ItemTabelaArmazenagem
+| Campo | Tipo | Observação |
+|---|---|---|
+| tabelaArmazenagemId | UUID | |
+| tipo | TipoCobrancaArmazenagem | `OCUPACAO_POSICAO_DIA`, `OCUPACAO_M3_DIA`, `MANUSEIO_RECEBIMENTO`, `MANUSEIO_SEPARACAO`, `MANUSEIO_EXPEDICAO` |
+| valorCentavos | Int | |
+| diasCarencia | Int | Padrão 0 |
+| minimoMensalCentavos | Int? | |
+
+### OcupacaoDiaria 🔒 (Tenant)
+| Campo | Tipo | Observação |
+|---|---|---|
+| armazemId | UUID | |
+| tenantId | UUID | Depositante |
+| data | Date | Única por (`armazemId`, `tenantId`, `data`) |
+| posicoesOcupadas | Int | |
+| volumeM3 | Decimal | `Decimal(12,3)` |
 
 ---
 
@@ -905,9 +960,16 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 
 | Enum | Valores |
 |---|---|
-| Papel | `SUPER_ADMIN`, `GESTOR`, `OPERADOR_EMPRESA`, `OPERADOR_HUB`, `DESPACHANTE`, `ROTEIRIZADOR`, `ENTREGADOR`, `FINANCEIRO`, `SUPORTE` |
+| Papel | `USER`, `ADMIN`, `DONO_EMPRESA`, `OPERADOR_EMPRESA`, `OPERADOR_ARMAZEM`, `DESPACHANTE`, `ROTEIRIZADOR`, `ENTREGADOR`, `CONTADOR`, `SUPORTE`, `CLIENTE` (`USER` é o padrão e não tem permissões; `CLIENTE` está reservado, sem uso definido) |
+| TipoTenant | `OPERADOR_LOGISTICO`, `LOJISTA` |
+| StatusTenant | `ATIVO`, `INATIVO`, `BLOQUEADO` |
+| NivelAcessoArmazem | `DEPOSITANTE`, `OPERADOR` (reservado) |
+| StatusAcesso | `ATIVO`, `SUSPENSO` |
+| RecursoPlataforma | `ADMINISTRAR_ARMAZEM`, `SO_TRANSPORTE`, `COBRAR_ARMAZENAGEM` |
+| TipoOrigemEncomenda | `ARMAZEM`, `COLETA_NA_ORIGEM` |
+| TipoCobrancaArmazenagem | `OCUPACAO_POSICAO_DIA`, `OCUPACAO_M3_DIA`, `MANUSEIO_RECEBIMENTO`, `MANUSEIO_SEPARACAO`, `MANUSEIO_EXPEDICAO` |
 | StatusPedido | `PENDENTE_VALIDACAO`, `CONFIRMADO`, `EM_PROCESSAMENTO`, `CONCLUIDO`, `PARCIALMENTE_CONCLUIDO`, `CANCELADO` |
-| StatusEncomenda | `CRIADA`, `AGUARDANDO_SEPARACAO`, `EM_SEPARACAO`, `SEPARADA`, `EMBALADA`, `AGUARDANDO_DESPACHO`, `DESPACHADA`, `EM_TRANSITO`, `NO_HUB`, `EM_ROTA`, `TENTATIVA_FALHA`, `AGUARDANDO_RETIRADA`, `ENTREGUE`, `EM_DEVOLUCAO`, `DEVOLVIDA`, `CANCELADA`, `EXTRAVIADA` |
+| StatusEncomenda | `CRIADA`, `AGUARDANDO_COLETA`, `COLETADA`, `AGUARDANDO_SEPARACAO`, `EM_SEPARACAO`, `SEPARADA`, `EMBALADA`, `AGUARDANDO_DESPACHO`, `DESPACHADA`, `EM_TRANSITO`, `NO_HUB`, `EM_ROTA`, `TENTATIVA_FALHA`, `AGUARDANDO_RETIRADA`, `ENTREGUE`, `EM_DEVOLUCAO`, `DEVOLVIDA`, `CANCELADA`, `EXTRAVIADA` |
 | TipoMovimento | `ENTRADA`, `SAIDA`, `TRANSFERENCIA`, `AJUSTE_POSITIVO`, `AJUSTE_NEGATIVO`, `RESERVA`, `LIBERACAO_RESERVA`, `BAIXA_DESCARTE`, `DEVOLUCAO` |
 | MotivoFalha | `DESTINATARIO_AUSENTE`, `ENDERECO_NAO_LOCALIZADO`, `ENDERECO_INSUFICIENTE`, `RECUSA_RECEBEDOR`, `ESTABELECIMENTO_FECHADO`, `AREA_DE_RISCO`, `FALTA_DE_TEMPO`, `AVARIA_CONSTATADA` |
 | CategoriaCnh | `A`, `B`, `C`, `D`, `E` |
@@ -919,13 +981,22 @@ Legenda de escopo: **Tenant** = pertence a uma empresa · **Operador** = da plat
 
 | Fase | Entidades |
 |---|---|
-| 1 | Tenant, Loja, Usuario, Sessao, TokenUsoUnico, ApiKey, Endereco, Destinatario, Produto, Armazem, CoberturaHub, Localizacao |
+| 1 | Tenant, Loja, Usuario, Sessao, TokenUsoUnico, ApiKey, RecursoTenant, Endereco, Destinatario, Produto, Armazem, CoberturaHub, Localizacao |
 | 2 | Pedido, ItemPedido, Contrato, ContratoServico, ServicoEntrega, ZonaFrete, ZonaFreteRegra, TabelaFrete, FaixaPreco, TaxaAdicional, PromocaoFrete, Feriado, Cotacao, Encomenda, ItemEncomenda, Volume, EventoRastreio |
-| 3 | SaldoEstoque, MovimentoEstoque, RecebimentoMercadoria, ItemRecebimento, InventarioContagem, OrdemSeparacao, ItemSeparacao, Manifesto, ManifestoVolume |
+| 3 | AcessoArmazem, SaldoEstoque, MovimentoEstoque, RecebimentoMercadoria, ItemRecebimento, InventarioContagem, OrdemSeparacao, ItemSeparacao, Manifesto, ManifestoVolume |
 | 4 | Transportadora, UnidadeConsolidada, RecebimentoHub, DivergenciaRecebimento |
 | 5 | Veiculo, Entregador, Rota, ParadaRota, ParadaEncomenda, TentativaEntrega, CodigoConfirmacao, PosicaoEntregador, Anexo |
 | 6 | Ocorrencia, ComentarioOcorrencia, Devolucao, InspecaoDevolucaoItem, Indenizacao |
-| 7 | LancamentoFinanceiro, Fatura, PagamentoFatura, RepasseEntregador, ItemRepasse |
+| 7 | LancamentoFinanceiro, Fatura, PagamentoFatura, RepasseEntregador, ItemRepasse, TabelaArmazenagem, ItemTabelaArmazenagem, OcupacaoDiaria |
 | 8 | WebhookEndpoint, WebhookEntrega, TemplateNotificacao, Notificacao, PreferenciaNotificacao, OutboxEvent, AuditLog, ParametroSistema, SolicitacaoLgpd |
 
 > **Fase 1 (o que você vai escrever primeiro):** comece por `Tenant` e `Usuario`; as demais entram conforme as fases avançam. Não modele tudo de uma vez.
+
+---
+
+## 13. Histórico de alterações
+
+| Versão | Mudança |
+|---|---|
+| 1.1 | Tenant: `OPERADOR_LOGISTICO`, status `ATIVO`/`INATIVO`/`BLOQUEADO`, campos financeiros e de frete marcados por fase (nulos para o operador logístico). Papéis alinhados ao schema. Novo modelo de armazém compartilhado: `Armazem.tenantId` (administrador) e `AcessoArmazem`. Escopo "Operador" substituído por "Via armazém". |
+| 1.2 | Novo: `RecursoTenant` (painel de permissões), coleta na origem (`tipoOrigem`, estados `AGUARDANDO_COLETA` e `COLETADA`), cobrança de armazenagem (`TabelaArmazenagem`, `ItemTabelaArmazenagem`, `OcupacaoDiaria`, `emissorTenantId` em lançamento e fatura). |

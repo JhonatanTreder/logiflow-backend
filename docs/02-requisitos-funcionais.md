@@ -1,6 +1,6 @@
 # LogiFlow — Requisitos Funcionais (RF)
 
-**Versão:** 1.0 · **Data:** 30/09/2026
+**Versão:** 1.2 · **Data:** 30/09/2026
 **Legenda de prioridade (MoSCoW):** **M** = Essencial · **S** = Importante · **C** = Desejável
 **Formato do ID:** `RF-<MÓDULO>-<NN>`. Regras relacionadas estão no documento 04 (`RN-…`); fluxos no documento 05 (`UC-…`).
 
@@ -25,7 +25,7 @@
 
 | ID | Requisito | Prio |
 |---|---|---|
-| RF-TEN-01 | O Super Admin deve cadastrar, editar, suspender e reativar empresas (tenants) com CNPJ, razão social e contatos. | M |
+| RF-TEN-01 | O Super Admin deve cadastrar, editar, bloquear, inativar e reativar empresas (tenants) com CNPJ, razão social e contatos. | M |
 | RF-TEN-02 | Cada empresa deve poder ter uma ou mais lojas, cada uma com nome, domínio e origem de pedidos. | M |
 | RF-TEN-03 | O Gestor deve cadastrar endereços de origem/coleta (um padrão e outros opcionais). | M |
 | RF-TEN-04 | O Gestor deve configurar parâmetros da empresa: horário de corte, serviço padrão, frete grátis, seguro automático, dados do remetente nas etiquetas. | M |
@@ -33,6 +33,7 @@
 | RF-TEN-06 | O Gestor deve configurar endpoints de webhook e segredos de assinatura. | M |
 | RF-TEN-07 | O Gestor deve personalizar a página de rastreio (logotipo, cores, mensagem, link da loja). | S |
 | RF-TEN-08 | O sistema deve registrar histórico de alterações nas configurações da empresa. | S |
+| RF-TEN-09 | O Super Admin deve gerir, em um painel de permissões, os recursos habilitados de cada tenant (administrar armazéns, envio sem estoque no sistema, cobrança de armazenagem), com auditoria. | M |
 
 ## CAT — Produtos e Estoque
 
@@ -51,6 +52,10 @@
 | RF-CAT-11 | O sistema deve alertar quando o saldo ficar abaixo do estoque mínimo configurado. | S |
 | RF-CAT-12 | O sistema deve controlar lote e validade, com regra FEFO na separação. | C |
 | RF-CAT-13 | O sistema deve transferir estoque entre localizações e entre armazéns. | S |
+| RF-CAT-14 | O administrador do armazém deve conceder, suspender e revogar o acesso de outros tenants ao armazém, definindo o nível de acesso (depositante; operador, quando habilitado). | M |
+| RF-CAT-15 | O sistema deve garantir que cada tenant veja e movimente apenas o próprio estoque no armazém, e que o administrador veja o estoque de todos os depositantes dos armazéns que administra. | M |
+| RF-CAT-16 | O sistema deve registrar em cada movimentação de estoque o tenant dono do estoque e o usuário que a executou, mesmo quando pertencem a tenants diferentes. | M |
+| RF-CAT-17 | O administrador deve poder reservar localizações (áreas dedicadas) a um tenant específico. | C |
 
 ## PED — Pedidos
 
@@ -68,6 +73,7 @@
 | RF-PED-10 | O sistema deve permitir dividir um pedido em várias encomendas (por armazém, peso ou disponibilidade). | S |
 | RF-PED-11 | O sistema deve informar à loja, por webhook, a mudança de status do pedido. | M |
 | RF-PED-12 | O sistema deve registrar pedidos com erro de validação em uma fila de pendências para correção. | S |
+| RF-PED-13 | O sistema deve verificar o estoque como primeiro passo do processamento do pedido e decidir o caminho: reservar e separar, aguardar reposição (*backorder*) ou, para tenants com o recurso, coleta na origem. | M |
 
 ## FRE — Frete e Cotação
 
@@ -123,6 +129,7 @@
 | RF-DES-12 | O sistema deve registrar a coleta/entrega do manifesto com responsável, data/hora e assinatura. | M |
 | RF-DES-13 | O sistema deve permitir agendar coletas na origem do lojista (janela, volumes estimados). | S |
 | RF-DES-14 | O sistema deve exibir painel de despacho com pendências por horário de corte. | S |
+| RF-DES-15 | O sistema deve tratar encomendas de coleta na origem: aguardar a coleta no endereço da loja, conferir os volumes coletados e encaminhá-los ao hub. | S |
 
 ## TRA — Transportadoras e Integrações de Transporte
 
@@ -220,6 +227,10 @@
 | RF-FIN-10 | O sistema deve exibir relatório de margem por empresa, serviço, região e transportadora. | S |
 | RF-FIN-11 | O sistema deve suportar saldo pré-pago por empresa como alternativa à fatura. | C |
 | RF-FIN-12 | O sistema deve suspender a emissão de novas encomendas por inadimplência conforme política. | C |
+| RF-FIN-13 | O administrador do armazém deve cadastrar tabelas de armazenagem (ocupação e manuseio), com versão e vigência, e aplicá-las aos depositantes. | S |
+| RF-FIN-14 | O sistema deve apurar diariamente a ocupação de cada depositante em cada armazém (posições e volume em m³). | S |
+| RF-FIN-15 | O sistema deve gerar lançamentos de armazenagem e de manuseio (recebimento, separação, expedição) e incluí-los nas faturas, com o administrador do armazém como emissor. | S |
+| RF-FIN-16 | O sistema deve exibir ao emissor e ao devedor o extrato e as faturas de armazenagem, sem expor dados de outros depositantes. | S |
 
 ## NOT — Notificações e Webhooks
 
@@ -282,22 +293,22 @@
 | Módulo | M | S | C | Total |
 |---|---|---|---|---|
 | AUT | 7 | 2 | 1 | 10 |
-| TEN | 6 | 2 | 0 | 8 |
-| CAT | 7 | 5 | 1 | 13 |
-| PED | 8 | 4 | 0 | 12 |
+| TEN | 7 | 2 | 0 | 9 |
+| CAT | 10 | 5 | 2 | 17 |
+| PED | 9 | 4 | 0 | 13 |
 | FRE | 9 | 4 | 1 | 14 |
 | ENC | 7 | 4 | 1 | 12 |
-| DES | 9 | 4 | 1 | 14 |
+| DES | 9 | 5 | 1 | 15 |
 | TRA | 5 | 3 | 1 | 9 |
 | HUB | 4 | 3 | 1 | 8 |
 | ROT | 10 | 8 | 0 | 18 |
 | RAS | 4 | 4 | 1 | 9 |
 | OCO | 8 | 3 | 0 | 11 |
-| FIN | 4 | 6 | 2 | 12 |
+| FIN | 4 | 10 | 2 | 16 |
 | NOT | 4 | 4 | 1 | 9 |
 | REL | 4 | 3 | 2 | 9 |
 | INT | 4 | 2 | 2 | 8 |
 | AUD | 2 | 5 | 1 | 8 |
-| **Total** | **102** | **66** | **16** | **184** |
+| **Total** | **107** | **71** | **17** | **195** |
 
 > Sugestão: crie um *issue* por RF no seu backlog, com label de módulo e prioridade.

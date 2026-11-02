@@ -1,6 +1,6 @@
 # LogiFlow — Casos de Uso
 
-**Versão:** 1.0 · **Data:** 30/09/2026
+**Versão:** 1.2 · **Data:** 30/09/2026
 Este documento descreve os atores, o catálogo completo de casos de uso (UC) e a especificação detalhada dos casos mais importantes. Cada caso referencia os requisitos (`RF-…`) e regras (`RN-…`) relacionados.
 
 ---
@@ -23,6 +23,28 @@ Este documento descreve os atores, o catálogo completo de casos de uso (UC) e a
 | A12 | Transportadora | Sistema externo | Executa trechos de transporte e envia eventos. |
 | A13 | Serviços de Apoio | Sistema externo | CEP, geocodificação, roteamento, e-mail/SMS. |
 | A14 | Agendador (Scheduler) | Sistema interno | Dispara jobs periódicos (faturamento, expiração, extravio, retenção). |
+
+### 1.1 Atores e papéis do sistema
+
+Apenas atores **humanos com login** têm um papel (enum `Papel`). Os demais entram por outros mecanismos.
+
+| Ator | Papel (`Papel`) |
+|---|---|
+| A01 Super Admin | `ADMIN` |
+| A02 Gestor da Empresa | `DONO_EMPRESA` |
+| A03 Operador da Empresa | `OPERADOR_EMPRESA` |
+| A04 Operador de Armazém/Hub | `OPERADOR_ARMAZEM` |
+| A05 Despachante | `DESPACHANTE` |
+| A06 Roteirizador | `ROTEIRIZADOR` |
+| A07 Entregador | `ENTREGADOR` |
+| A08 Financeiro | `CONTADOR` |
+| A09 Suporte | `SUPORTE` |
+| A10 Destinatário | Sem login e sem papel (`CLIENTE` está reservado, sem uso definido) |
+| A11 Plataforma de E-commerce | Sem papel: autentica por chave de API |
+| A12 Transportadora, A13 Serviços de Apoio | Sem papel: integrações por adapter e webhooks |
+| A14 Agendador | Sem papel: processo interno |
+
+`USER` é o papel padrão de um usuário recém-criado e **não tem permissões**. Os papéis de operação de armazém (A04 a A07) pertencem ao tenant **administrador** do armazém ou hub em que atuam; o "administrador do armazém" citado nos casos de uso é o usuário `DONO_EMPRESA` desse tenant.
 
 ---
 
@@ -110,13 +132,15 @@ flowchart LR
 | UC-01 ★ | Autenticar-se no sistema | Todos os humanos | RF-AUT-01..04 | M |
 | UC-02 | Recuperar senha | Todos os humanos | RF-AUT-03 | M |
 | UC-03 ★ | Cadastrar e configurar empresa | Super Admin | RF-TEN-01..05 | M |
-| UC-04 | Suspender/reativar empresa | Super Admin | RF-TEN-01 | M |
+| UC-04 | Bloquear, inativar e reativar empresa | Super Admin | RF-TEN-01 | M |
 | UC-05 | Configurar lojas, origens e parâmetros | Gestor | RF-TEN-02..04 | M |
 | UC-06 | Gerir usuários e papéis | Gestor | RF-AUT-05..08 | M |
 | UC-07 | Gerir chaves de API | Gestor | RF-AUT-09 | M |
 | UC-08 | Cadastrar produtos (individual e CSV) | Operador Empresa | RF-CAT-01..03 | M |
-| UC-09 | Cadastrar armazéns, hubs e localizações | Super Admin / Operador Hub | RF-CAT-04..05, RF-HUB-01 | M |
+| UC-09 | Cadastrar armazéns, hubs e localizações | Administrador do armazém | RF-CAT-04..05, RF-HUB-01 | M |
 | UC-10 | Gerir tabelas de frete e serviços | Super Admin | RF-FRE-01..03, 09, 11 | M |
+| UC-51 ★ | Gerir acesso de empresas ao armazém | Administrador do armazém | RF-CAT-14, 15, 17 | M |
+| UC-52 ★ | Gerir recursos habilitados do tenant | Super Admin | RF-TEN-09 | M |
 
 ### 3.2 Pedido, Frete e Encomenda
 | ID | Caso de uso | Ator principal | RF | Prio |
@@ -169,6 +193,7 @@ flowchart LR
 | UC-40 ★ | Fechar fatura periódica | Agendador / Financeiro | RF-FIN-03..06 | M |
 | UC-41 | Conciliar custos de transportadora | Financeiro | RF-FIN-08 | S |
 | UC-42 | Fechar repasse de entregadores | Financeiro | RF-FIN-09 | S |
+| UC-53 ★ | Gerir tabelas de armazenagem e cobrança | Administrador do armazém | RF-FIN-13..16 | S |
 | UC-43 ★ | Notificar eventos (e-mail e webhook) | Sistema | RF-NOT-01..07 | M |
 | UC-44 | Configurar webhooks e consultar entregas | Gestor | RF-TEN-06, RF-NOT-07 | M |
 | UC-45 | Consultar dashboards e relatórios | Gestor / Operadores | RF-REL-01..07 | M |
@@ -188,7 +213,7 @@ flowchart LR
 
 ### UC-01 — Autenticar-se no sistema
 - **Ator:** qualquer usuário humano · **RF:** RF-AUT-01, 02, 04, 08 · **RN:** RN-SEG-02, 04, 06
-- **Pré:** usuário ativo, empresa não suspensa para papéis de empresa.
+- **Pré:** usuário ativo, tenant ativo (não bloqueado nem inativo).
 - **FP:**
   1. Usuário informa e-mail e senha.
   2. Sistema valida credenciais e estado da conta.
@@ -210,7 +235,7 @@ flowchart LR
 - **FP:**
   1. Super Admin informa CNPJ, razão social, contatos e plano de faturamento (ciclo).
   2. Sistema valida CNPJ (dígitos e unicidade).
-  3. Sistema cria o tenant e o primeiro usuário `GESTOR` (convite por e-mail).
+  3. Sistema cria o tenant e o primeiro usuário `DONO_EMPRESA` (convite por e-mail).
   4. Super Admin vincula contrato: serviços, tabelas de frete, vigência.
   5. Sistema ativa a empresa e registra auditoria.
 - **FA1 — Copiar contrato de outra empresa:** sistema duplica tabelas e permite ajustes.
@@ -228,11 +253,12 @@ flowchart LR
   3. Sistema verifica idempotência (loja + número externo).
   4. Sistema valida/normaliza o endereço (CEP) e geocodifica.
   5. Sistema valida produtos (SKU existente e completo).
-  6. Sistema persiste o pedido como `CONFIRMADO`, reserva estoque (RN-EST-02) e publica `pedido.criado`.
+  6. Sistema persiste o pedido como `CONFIRMADO` e **verifica o estoque primeiro** (RN-EST-02): com saldo suficiente para todos os itens, reserva tudo e o pedido segue para separação; sem saldo, aplica-se FA3 ou FA4. Em seguida publica `pedido.criado`.
   7. Sistema responde `201` com o pedido e o link de acompanhamento.
 - **FA1 — Pedido já existente:** responde `200` com o pedido original (sem duplicar).
 - **FA2 — Endereço com inconsistência corrigível:** pedido fica `PENDENTE_VALIDACAO` e entra na fila de pendências (RN-PED-03/04); resposta `202`.
-- **FA3 — Sem estoque:** pedido `CONFIRMADO` com itens em *backorder* (RN-EST-02).
+- **FA3 — Sem estoque, tenant sem o recurso `SO_TRANSPORTE`:** pedido `CONFIRMADO` com itens em *backorder* (RN-EST-02).
+- **FA4 — Sem estoque, tenant com o recurso `SO_TRANSPORTE`:** nada é reservado; o pedido segue como **coleta na origem**, e a encomenda partirá do endereço de origem da loja (RN-REC-03, RN-ENC-04).
 - **FE1 — Payload inválido:** `422` em Problem Details com lista de erros.
 - **FE2 — Serviço de CEP indisponível:** usa cache; se não houver, aceita como `PENDENTE_VALIDACAO` (degradação graciosa).
 - **FE3 — SKU inexistente:** `422` identificando os itens.
@@ -271,10 +297,52 @@ flowchart LR
 - **FA1 — Divisão em várias encomendas:** itens em armazéns distintos ou excedendo limites geram N encomendas (RN-PED-07).
 - **FA2 — Seleção automática de transportadora/modal:** aplica RN-TRA-01.
 - **FE1 — Produto incompleto/proibido:** bloqueia e indica o item (RN-CAD-02, RN-FRE-13).
-- **FE2 — Empresa inadimplente/suspensa:** bloqueia (RN-GER-03, RN-FIN-07).
+- **FE2 — Empresa bloqueada ou inativa:** bloqueia (RN-GER-03, RN-FIN-07).
 - **Pós:** encomenda criada com rastreio; fila de separação atualizada.
 
 ---
+
+### UC-51 — Gerir acesso de empresas ao armazém
+- **Ator:** Administrador do armazém (usuário `DONO_EMPRESA` do tenant administrador) · **RF:** RF-CAT-14, RF-CAT-15, RF-CAT-17 · **RN:** RN-ARM-01..05, 08, 09
+- **Pré:** armazém cadastrado e ativo; tenant a autorizar existente e ativo.
+- **FP:**
+  1. Administrador abre o armazém e seleciona "Acessos".
+  2. Informa a empresa (por CNPJ) e o nível de acesso (`DEPOSITANTE`).
+  3. Sistema valida que a empresa está ativa e ainda não possui vínculo com o armazém.
+  4. Sistema cria o vínculo `ATIVO` e registra a auditoria.
+  5. A empresa passa a ver o armazém e a poder guardar estoque nele, enxergando apenas o próprio estoque (RN-ARM-05).
+- **FA1 — Suspender o acesso:** novas entradas e reservas da empresa são bloqueadas; o estoque existente continua disponível para separação e retirada (RN-ARM-03).
+- **FA2 — Reservar localização (desejável):** administrador marca uma localização para uso exclusivo da empresa (RN-ARM-08).
+- **FE1 — Revogar com saldo:** o sistema recusa enquanto houver estoque da empresa no armazém e exige retirada ou transferência (RN-ARM-09).
+- **FE2 — Empresa já vinculada ou inativa:** o sistema rejeita e informa o motivo.
+- **Pós:** vínculo registrado e auditado; visibilidade de estoque ajustada conforme o vínculo.
+
+### UC-52 — Gerir recursos habilitados do tenant
+- **Ator:** Super Admin (`ADMIN`) · **RF:** RF-TEN-09 · **RN:** RN-REC-01..05, RN-SEG-09
+- **Pré:** `ADMIN` autenticado com 2FA; tenant existente.
+- **FP:**
+  1. O `ADMIN` abre o painel de permissões e seleciona o tenant.
+  2. O sistema lista os recursos (`ADMINISTRAR_ARMAZEM`, `SO_TRANSPORTE`, `COBRAR_ARMAZENAGEM`) e o estado de cada um.
+  3. O `ADMIN` habilita ou revoga um recurso.
+  4. O sistema valida as dependências (`COBRAR_ARMAZENAGEM` exige `ADMINISTRAR_ARMAZEM`).
+  5. O sistema grava a alteração e registra a auditoria.
+  6. A nova permissão vale a partir da próxima requisição do tenant.
+- **FA1 — Revogar com armazéns existentes:** os armazéns e acessos atuais continuam; o tenant só não cria novos (RN-REC-05).
+- **FE1 — Dependência não atendida:** o sistema recusa e informa o recurso exigido.
+- **Pós:** recurso atualizado e auditado.
+
+### UC-53 — Gerir tabelas de armazenagem e cobrança
+- **Ator:** Administrador do armazém (`DONO_EMPRESA` do tenant administrador) · **RF:** RF-FIN-13..16 · **RN:** RN-ARM-11..18, RN-REC-04
+- **Pré:** tenant com `ADMINISTRAR_ARMAZEM` e `COBRAR_ARMAZENAGEM` (a plataforma os possui); armazém cadastrado.
+- **FP:**
+  1. O administrador cria uma tabela de armazenagem do armazém, com itens (tipo de cobrança, valor, carência, mínimo mensal) e vigência.
+  2. O sistema valida e versiona a tabela.
+  3. O administrador aplica a tabela ao vínculo do depositante (`AcessoArmazem`).
+  4. A partir da vigência, o sistema apura a ocupação diária e gera os lançamentos de manuseio nos eventos (RN-ARM-13, RN-ARM-14).
+  5. Os lançamentos seguem para a fatura (UC-40).
+- **FA1 — Alterar valores:** gera nova versão, que não retroage (RN-ARM-15).
+- **FE1 — Tenant sem `COBRAR_ARMAZENAGEM`:** o sistema recusa.
+- **Pós:** tabela vigente aplicada; cobrança de armazenagem habilitada para o depositante.
 
 ### UC-19 — Receber mercadoria e endereçar estoque
 - **Ator:** Operador de Armazém · **RF:** RF-CAT-06..09 · **RN:** RN-EST-01, 06, 07
@@ -294,7 +362,7 @@ flowchart LR
 ---
 
 ### UC-20 — Separar e embalar encomenda
-- **Ator:** Operador de Armazém · **RF:** RF-DES-01..07, RF-CAT-09 · **RN:** RN-DES-01..04, RN-EST-04, 05
+- **Ator:** Operador de Armazém · **RF:** RF-DES-01..07, RF-CAT-09 · **RN:** RN-DES-01..04, RN-EST-04, 05, RN-ARM-05, 06
 - **Pré:** encomenda em `AGUARDANDO_SEPARACAO`; estoque reservado.
 - **FP:**
   1. Operador solicita a próxima tarefa (fila ordenada por RN-DES-01); encomenda → `EM_SEPARACAO`.
@@ -487,6 +555,7 @@ flowchart LR
   5. Sistema agenda lembretes e controle de vencimento.
 - **FA1 — Revisão prévia:** Financeiro pode manter a fatura em `RASCUNHO` para ajustes antes de fechar.
 - **FA2 — Saldo credor:** crédito excedente abate a próxima fatura.
+- **FA3 — Armazenagem:** lançamentos de armazenagem e manuseio entram na mesma fatura quando o administrador é a plataforma; quando é outro tenant, gera-se fatura própria com ele como emissor (RN-ARM-16, RN-FIN-12).
 - **FE1 — Falha do job:** retentativa idempotente; alerta ao Super Admin.
 - **FE2 — Vencimento sem pagamento:** aplica multa/juros e, aos 15 dias, bloqueia emissão (RN-FIN-04/07).
 - **Pós:** lançamentos vinculados à fatura (imutáveis); vencimento controlado.
@@ -561,6 +630,7 @@ sequenceDiagram
 | Situação | Onde ocorre | Tratamento | UC / RN |
 |---|---|---|---|
 | Sem estoque no pedido | Etapa 2 | Pedido confirmado em *backorder*, loja notificada. | UC-11 FA3, RN-EST-02 |
+| Sem estoque, tenant com `SO_TRANSPORTE` | Etapa 2 | Coleta na origem: `AGUARDANDO_COLETA` → `COLETADA` → `NO_HUB`, sem separação no armazém. | UC-11 FA4, RN-REC-03, RN-ENC-04 |
 | Endereço inválido | Etapas 2 e 10 | `PENDENTE_VALIDACAO` ou ocorrência `ENDERECO_INSUFICIENTE`; encomenda pausada. | UC-11 FA2, RN-ENT-07 |
 | Item faltando na separação | Etapa 4 | Busca outra localização; senão pausa e notifica a loja. | UC-20 FA1, RN-DES-03 |
 | Volume faltante no hub | Etapa 7 | Ocorrência `DIVERGENCIA`, busca de 48 h. | UC-25 FA2, RN-HUB-03 |
@@ -586,8 +656,8 @@ sequenceDiagram
 
 | Módulo | Casos de uso principais |
 |---|---|
-| AUT / TEN | UC-01, 02, 03, 04, 05, 06, 07 |
-| CAT | UC-08, 09, 19, 24 |
+| AUT / TEN | UC-01, 02, 03, 04, 05, 06, 07, 52 |
+| CAT | UC-08, 09, 19, 24, 51 |
 | PED | UC-11, 12, 13, 16, 17 |
 | FRE | UC-10, 14 |
 | ENC | UC-15, 17, 18, 50 |
@@ -596,7 +666,7 @@ sequenceDiagram
 | ROT | UC-27, 28, 29, 30, 31, 34 |
 | RAS | UC-33, 18 |
 | OCO | UC-35, 36, 37, 38 |
-| FIN | UC-39, 40, 41, 42 |
+| FIN | UC-39, 40, 41, 42, 53 |
 | NOT | UC-43, 44 |
 | REL | UC-45, 46 |
 | AUD | UC-47, 48, 49 |

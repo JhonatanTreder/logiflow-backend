@@ -7,62 +7,122 @@ datasource db {
   provider = "postgresql"
 }
 
-enum TipoTenant {
-  OPERADOR_LOGISTICO
-  LOJISTA
+enum TenantType {
+  LOGISTICS_OPERATOR
+  MERCHANT
 
-  @@map("tipo_tenant")
+  @@map("tenant_type")
 }
 
-enum StatusTenant {
-  ATIVO
-  INATIVO
-  BLOQUEADO
+enum TenantStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
 
-  @@map("status_tenant")
+  @@map("tenant_status")
 }
 
-enum Papel {
+enum Role {
   USER
   ADMIN // Acesso ao painel da LogiFlow
-  DONO_EMPRESA
-  OPERADOR_EMPRESA
-  OPERADOR_ARMAZEM
-  DESPACHANTE
-  ROTEIRIZADOR
-  ENTREGADOR
-  CONTADOR
-  SUPORTE
-  CLIENTE
+  TENANT_OWNER
+  TENANT_OPERATOR
+  WAREHOUSE_OPERATOR
+  DISPATCHER
+  ROUTE_PLANNER
+  DELIVERY_DRIVER
+  ACCOUNTANT
+  SUPPORT
+  CUSTOMER
 
-  @@map("papel_usuario")
+  @@map("user_role")
 }
 
-enum StatusUsuario {
-  ATIVO
-  INATIVO
-  CONVIDADO
-  BLOQUEADO
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  INVITED
+  BLOCKED
 
-  @@map("status_usuario")
+  @@map("user_status")
+}
+
+enum TokenType {
+  PASSWORD_RESET
+  INVITATION
+
+  @@map("token_type")
+}
+
+/**
+ * Esse enum não se diz respeito ao local de desenvolvimento (apesar do conceito parecer)
+ * Ele se refere ao ambiente da API, especificando quais dados serão gravados/tratados em
+ * Cada ambiente, justamente porque não existe uma divisão no banco de dados sendo realizada
+ * nessa primeira fase do projeto. A ideia futuramente é dividir a aplicação em bancos diferentes
+ * porém iremos utilizar o mesmo banco de dados para todos os ambientes, mas fazendo essa
+ * diferenciação/divisão a nível dessas variáveis de ambiente (como esse ApiEnvironment)
+ * e também a nível de variáveis de ambiente do sistema operacional (como o NODE_ENV)
+ */
+enum ApiEnvironment {
+  PRODUCTION
+  TEST
+
+  @@map("api_environment")
+}
+
+enum GeoPrecision {
+  HIGH
+  MEDIUM
+  LOW
+  NOT_GEOCODED
+
+  @@map("geo_precision")
+}
+
+enum WarehouseType {
+  WAREHOUSE
+  COLLECTION_HUB
+  SORTING_HUB
+  LAST_MILE_HUB
+
+  @@map("warehouse_type")
+}
+
+enum WarehouseAccessLevel {
+  DEPOSITOR
+  OPERATOR
+
+  @@map("warehouse_access_level")
+}
+
+enum AccessStatus {
+  ACTIVE
+  SUSPENDED
+
+  @@map("access_status")
 }
 
 model Tenant {
-  id              String       @id @default(uuid()) @db.Uuid
-  tipo            TipoTenant
-  
-  razaoSocial     String
-  nomeFantasia    String?
-  cnpj            String       @unique // Somente os 14 dígitos; validar o formato na aplicação
+  id           String       @id @default(uuid()) @db.Uuid
+  type         TenantType
+  legalName    String
+  tradeName    String?
+  cnpj         String       @unique // Somente os 14 dígitos; validar o formato na aplicação
+  status       TenantStatus @default(ACTIVE)
+  contactEmail String
+  contactPhone String
 
-  status          StatusTenant @default(ATIVO)
-  contatoEmail    String
-  contatoTelefone String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-
-  users User[]
+  users             User[]
+  stores            Store[]
+  apiKeys           ApiKey[]
+  addresses         Address[]
+  receivers         Receiver[]
+  products          Product[]
+  warehouses        Warehouse[]       @relation("WarehouseAdministrator")
+  warehouseAccesses WarehouseAccess[] @relation("WarehouseAccessTenant")
 
   @@map("tenants")
 }
@@ -72,22 +132,270 @@ model User {
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
-  nome      String
-  email     String // Normalizar para minúsculas na aplicação
-  senhaHash String // Argon2id
-  
-  papel     Papel         @default(USER)
-  status    StatusUsuario @default(ATIVO)
+  name         String
+  email        String // Normalizar para minúsculas na aplicação
+  passwordHash String // Argon2id
 
-  totpAtivo         Boolean   @default(false)
-  totpSecretCifrado String?
-  tentativasFalhas  Int       @default(0)
-  bloqueadoAte      DateTime?
-  ultimoAcessoEm    DateTime?
+  role   Role       @default(USER)
+  status UserStatus @default(ACTIVE)
+
+  totpEnabled      Boolean   @default(false)
+  encryptedTotpKey String?
+  failedAttempts   Int       @default(0)
+  lockedUntil      DateTime?
+  lastAccessAt     DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  singleUseTokens          SingleUseToken[]
+  grantedWarehouseAccesses WarehouseAccess[] @relation("WarehouseAccessGrantedBy")
+
   @@unique([tenantId, email])
+  @@index([tenantId])
   @@map("users")
+}
+
+model Store {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  originAddressId String?  @db.Uuid
+  originAddress   Address? @relation("StoreOriginAddress", fields: [originAddressId], references: [id], onDelete: Restrict)
+
+  name   String
+  domain String?
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([originAddressId])
+  @@map("stores")
+}
+
+model SingleUseToken {
+  id String @id @default(uuid()) @db.Uuid
+
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type      TokenType
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("single_use_tokens")
+}
+
+model ApiKey {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  name           String
+  prefix         String
+  hash           String         @unique
+  apiEnvironment ApiEnvironment
+  scopes         String[]
+  lastUsedAt     DateTime?
+  revokedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("api_keys")
+}
+
+model Address {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  postalCode   String  @db.Char(8)
+  street       String
+  number       String
+  complement   String?
+  neighborhood String
+  city         String
+  state        String  @db.Char(2)
+  ibgeCode     String?
+
+  latitude  Decimal? @db.Decimal(9, 6)
+  longitude Decimal? @db.Decimal(9, 6)
+
+  geoAccuracy GeoPrecision @default(NOT_GEOCODED)
+  validated   Boolean      @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  storesUsingAsOrigin Store[]     @relation("StoreOriginAddress")
+  warehouses          Warehouse[] @relation("WarehouseAddress")
+
+  @@index([tenantId])
+  @@map("addresses")
+}
+
+model Receiver {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  name         String
+  document     String? //CPF/CNPJ precisam estar validados
+  email        String?
+  phone        String? //Padrão E.164
+  anonymizedAt DateTime? //Dado de LGPD
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("receivers")
+}
+
+model Product {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  sku String
+
+  name        String
+  description String?
+  barcode     String?
+
+  parentProductId String?   @db.Uuid
+  parentProduct   Product?  @relation("ProductVariations", fields: [parentProductId], references: [id], onDelete: Restrict)
+  variations      Product[] @relation("ProductVariations")
+
+  weightG  Int?
+  heightCm Decimal? @db.Decimal(9, 2)
+  widthCm  Decimal? @db.Decimal(9, 2)
+  lengthCm Decimal? @db.Decimal(9, 2)
+
+  valueCents Int
+
+  fragile    Boolean @default(false)
+  dangerous  Boolean @default(false)
+  perishable Boolean @default(false)
+
+  minimumStock Int     @default(0)
+  active       Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+  @@index([parentProductId])
+  @@map("products")
+}
+
+model Warehouse {
+  id String @id @default(uuid()) @db.Uuid
+
+  // Tenant responsável pela administração do armazém.
+  tenantId String @db.Uuid
+  tenant   Tenant @relation("WarehouseAdministrator", fields: [tenantId], references: [id], onDelete: Restrict)
+
+  name String
+  code String        @unique
+  type WarehouseType
+
+  addressId String  @db.Uuid
+  address   Address @relation("WarehouseAddress", fields: [addressId], references: [id], onDelete: Restrict)
+
+  capacityVolumes Int?
+  operatingHours  Json
+
+  active Boolean @default(true)
+
+  // Tenants autorizados a acessar este armazém.
+  accesses WarehouseAccess[]
+
+  locations WarehouseLocation[]
+  coverages WarehouseCoverage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([addressId])
+  @@map("warehouses")
+}
+
+model WarehouseAccess {
+  id String @id @default(uuid()) @db.Uuid
+
+  warehouseId String    @db.Uuid
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  // Tenant que recebeu autorização para acessar o armazém.
+  tenantId String @db.Uuid
+  tenant   Tenant @relation("WarehouseAccessTenant", fields: [tenantId], references: [id], onDelete: Restrict)
+
+  accessLevel WarehouseAccessLevel
+  status      AccessStatus         @default(ACTIVE)
+
+  // Usuário responsável por conceder a autorização.
+  grantedById String @db.Uuid
+  grantedBy   User   @relation("WarehouseAccessGrantedBy", fields: [grantedById], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([warehouseId, tenantId])
+  @@index([tenantId])
+  @@index([grantedById])
+  @@map("warehouse_accesses")
+}
+
+// Faixas de CEP atendidas por um hub (sem sobreposição entre hubs: validar na aplicação).
+model WarehouseCoverage {
+  id String @id @default(uuid()) @db.Uuid
+
+  warehouseId String    @db.Uuid
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  startPostalCode String @db.Char(8)
+  endPostalCode   String @db.Char(8)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([warehouseId])
+  @@index([startPostalCode, endPostalCode])
+  @@map("warehouse_coverages")
+}
+
+model WarehouseLocation {
+  id String @id @default(uuid()) @db.Uuid
+
+  warehouseId String    @db.Uuid
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  code     String
+  aisle    String
+  shelf    String
+  level    String
+  position String?
+
+  blocked Boolean @default(false) // Durante o inventário
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([warehouseId, code])
+  @@map("warehouse_locations")
 }
